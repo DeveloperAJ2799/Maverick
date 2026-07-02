@@ -12,6 +12,8 @@ confinement principle.
 """
 import ast
 import os
+import sys
+import pytest
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent / "routes" / "personal_routes.py"
@@ -26,7 +28,7 @@ def _function_source(src_text, name):
 
 
 def test_confinement_uses_realpath_not_abspath():
-    body = _function_source(SRC.read_text(), "_resolve_allowed_personal_dir")
+    body = _function_source(SRC.read_text(encoding="utf-8"), "_resolve_allowed_personal_dir")
     assert "os.path.realpath" in body, (
         "_resolve_allowed_personal_dir must use os.path.realpath so a symlink "
         "inside PERSONAL_DIR cannot escape the confinement check"
@@ -37,6 +39,7 @@ def test_confinement_uses_realpath_not_abspath():
     )
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks require admin/developer mode on Windows")
 def test_realpath_catches_symlink_escape(tmp_path):
     # The principle the fix relies on: abspath keeps the symlink path inside the
     # base (confinement fooled); realpath resolves it outside (confinement holds).

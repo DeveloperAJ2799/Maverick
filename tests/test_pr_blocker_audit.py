@@ -391,7 +391,7 @@ def test_no_fetch_files_skips_progress(monkeypatch, capsys):
 def test_area_classification():
     audit = load_module()
 
-    areas = audit.classify_areas(["scripts/odysseus-mail", "tests/test_email.py"], "CalDAV sync")
+    areas = audit.classify_areas(["scripts/mavrick-mail", "tests/test_email.py"], "CalDAV sync")
 
     assert "Email / CalDAV" in areas
     assert "Docs / tooling / tests" in areas
@@ -724,6 +724,7 @@ def test_color_auto_requires_terminal_and_support(monkeypatch):
     audit = load_module()
     args = audit.argparse.Namespace(format="terminal", color="auto", output=None)
 
+    monkeypatch.setattr(audit, "enable_windows_vt_mode", lambda: True)
     monkeypatch.setattr(audit.sys.stdout, "isatty", lambda: True)
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setitem(audit.os.environ, "TERM", "xterm-256color")

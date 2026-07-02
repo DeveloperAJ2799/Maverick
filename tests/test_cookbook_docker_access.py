@@ -56,6 +56,7 @@ async def test_container_cli_only_is_rejected(monkeypatch, tmp_path):
     assert "docker/host-docker.yml" in message
 
 
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="UNIX domain sockets not supported on this platform")
 @pytest.mark.asyncio
 async def test_container_opt_in_with_unix_socket_is_allowed(monkeypatch, tmp_path):
     monkeypatch.setattr(cookbook_routes.shutil, "which", lambda binary: "/usr/bin/docker")
@@ -68,7 +69,7 @@ async def test_container_opt_in_with_unix_socket_is_allowed(monkeypatch, tmp_pat
             None,
             None,
             in_container=True,
-            environ={"ODYSSEUS_ENABLE_HOST_DOCKER": "true"},
+            environ={"MAVRICK_ENABLE_HOST_DOCKER": "true"},
             socket_path=str(socket_path),
         )
 
@@ -200,6 +201,7 @@ async def test_local_container_serve_allows_generated_docker_exec_when_enabled(
         launched_commands.append(command)
         return _Process()
 
+    monkeypatch.setattr(cookbook_routes, "IS_WINDOWS", False)
     monkeypatch.setattr(cookbook_routes, "require_admin", lambda request: None)
     monkeypatch.setattr(cookbook_routes, "_binary_available", binary_available)
     monkeypatch.setattr(cookbook_routes, "running_in_container", lambda: True)
@@ -317,7 +319,7 @@ def test_local_ollama_download_probe_omits_docker_commands_when_blocked():
     assert "command -v docker" not in rendered
     assert "docker ps" not in rendered
     assert "docker exec" not in rendered
-    assert "ODYSSEUS_OLLAMA_PULL_CMD" in rendered
+    assert "MAVRICK_OLLAMA_PULL_CMD" in rendered
     assert "docker/host-docker.yml" in rendered
     assert "exit 127" in rendered
 
@@ -335,5 +337,5 @@ def test_local_ollama_download_probe_keeps_docker_fallback_when_allowed():
     rendered = "\n".join(lines)
 
     assert "docker ps" in rendered
-    assert "docker exec ${ODYSSEUS_OLLAMA_CONTAINER}" in rendered
-    assert "ODYSSEUS_OLLAMA_PULL_CMD" in rendered
+    assert "docker exec ${MAVRICK_OLLAMA_CONTAINER}" in rendered
+    assert "MAVRICK_OLLAMA_PULL_CMD" in rendered

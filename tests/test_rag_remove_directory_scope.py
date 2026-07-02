@@ -3,7 +3,7 @@ directory's chunks, never wipe the whole shared collection.
 
 Two compounding defects were fixed:
   1. PersonalDocsManager.remove_directory called rag_manager.rebuild_index(),
-     which delete+recreates the entire shared "odysseus_rag" collection (all
+     which delete+recreates the entire shared "mavrick_rag" collection (all
      owners + the base index), then re-indexed only the remaining tracked dirs
      (ownerless, never personal_dir). Now it does a targeted per-directory delete.
   2. VectorRAG.remove_directory selected via where={"source": {"$contains": dir}},
@@ -54,14 +54,14 @@ def _make_vectorrag(rows):
 
 def test_vectorrag_remove_is_path_bounded():
     rows = [
-        ("a", {"source": "/a/docs/f1.md"}),
-        ("b", {"source": "/a/docs/sub/f2.md"}),   # nested -> must be removed
-        ("c", {"source": "/a/docs2/f3.md"}),       # sibling prefix -> must survive
-        ("d", {"source": "/a/docs_personal/f4.md"}),  # sibling prefix -> must survive
+        ("a", {"source": os.path.abspath("/a/docs/f1.md")}),
+        ("b", {"source": os.path.abspath("/a/docs/sub/f2.md")}),   # nested -> must be removed
+        ("c", {"source": os.path.abspath("/a/docs2/f3.md")}),       # sibling prefix -> must survive
+        ("d", {"source": os.path.abspath("/a/docs_personal/f4.md")}),  # sibling prefix -> must survive
         ("e", {"filename": "no-source.md"}),       # sourceless dict -> must not crash/survive
     ]
     rag = _make_vectorrag(rows)
-    res = rag.remove_directory("/a/docs")
+    res = rag.remove_directory(os.path.abspath("/a/docs"))
     assert res["success"] is True
     assert res["removed_count"] == 2
     remaining = set(rag._collection.get()["ids"])
@@ -69,8 +69,8 @@ def test_vectorrag_remove_is_path_bounded():
 
 
 def test_vectorrag_remove_no_match_is_noop():
-    rag = _make_vectorrag([("a", {"source": "/a/docs/f1.md"})])
-    res = rag.remove_directory("/nowhere")
+    rag = _make_vectorrag([("a", {"source": os.path.abspath("/a/docs/f1.md")})])
+    res = rag.remove_directory(os.path.abspath("/nowhere"))
     assert res["success"] is True
     assert res["removed_count"] == 0
     assert set(rag._collection.get()["ids"]) == {"a"}

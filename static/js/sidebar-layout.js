@@ -478,8 +478,8 @@ export function initSidebarLayout(Storage, opts) {
 // horizontal — without that, Firefox (and others) treat the horizontal swipe
 // as their own scroll/navigation gesture and our handler never gets to act.
 function _initChatSwipeToOpenSidebar() {
-  if (window.__odySwipeWired) return;
-  window.__odySwipeWired = true;
+  if (window.__mavSwipeWired) return;
+  window.__mavSwipeWired = true;
 
   // Areas where a horizontal drag means something else (their own scroll/drag).
   const EXCLUDE = [

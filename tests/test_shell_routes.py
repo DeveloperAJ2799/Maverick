@@ -126,7 +126,7 @@ class TestFindLineBreak:
 
 
 class TestRunningInContainer:
-    """Detect whether the Odysseus process itself runs inside a container."""
+    """Detect whether the Mavrick process itself runs inside a container."""
 
     def test_dockerenv_marker_present(self, tmp_path):
         marker = tmp_path / ".dockerenv"
@@ -174,9 +174,16 @@ class TestRunningInContainer:
 class TestAppleSiliconDetection:
     """APFEL should only surface as available on native Apple Silicon Macs."""
 
+    @pytest.fixture(autouse=True)
+    def _restore_platform_compat(self):
+        import core.platform_compat as platform_compat
+        yield
+        importlib.reload(platform_compat)
+
     def test_reports_true_on_macos_arm64(self, monkeypatch):
         import core.platform_compat as platform_compat
 
+        monkeypatch.setattr(platform_compat.os, "name", "posix")
         monkeypatch.setattr(platform_compat.platform, "system", lambda: "Darwin")
         monkeypatch.setattr(platform_compat.platform, "machine", lambda: "arm64")
         importlib.reload(platform_compat)
@@ -187,6 +194,7 @@ class TestAppleSiliconDetection:
     def test_reports_false_off_apple_silicon(self, monkeypatch, machine):
         import core.platform_compat as platform_compat
 
+        monkeypatch.setattr(platform_compat.os, "name", "posix")
         monkeypatch.setattr(platform_compat.platform, "system", lambda: "Darwin")
         monkeypatch.setattr(platform_compat.platform, "machine", lambda: machine)
         importlib.reload(platform_compat)
@@ -196,6 +204,7 @@ class TestAppleSiliconDetection:
     def test_reports_false_on_non_macos(self, monkeypatch):
         import core.platform_compat as platform_compat
 
+        monkeypatch.setattr(platform_compat.os, "name", "posix")
         monkeypatch.setattr(platform_compat.platform, "system", lambda: "Linux")
         monkeypatch.setattr(platform_compat.platform, "machine", lambda: "arm64")
         importlib.reload(platform_compat)
@@ -279,17 +288,18 @@ class TestDockerRowStatus:
 
 class TestHostDockerAccess:
     def test_opt_in_without_socket_is_disabled(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ODYSSEUS_ENABLE_HOST_DOCKER", "true")
+        monkeypatch.setenv("MAVRICK_ENABLE_HOST_DOCKER", "true")
 
         assert _host_docker_access_enabled(str(tmp_path / "missing.sock")) is False
 
     def test_regular_file_is_not_accepted(self, monkeypatch, tmp_path):
         socket_path = tmp_path / "docker.sock"
         socket_path.touch()
-        monkeypatch.setenv("ODYSSEUS_ENABLE_HOST_DOCKER", "true")
+        monkeypatch.setenv("MAVRICK_ENABLE_HOST_DOCKER", "true")
 
         assert _host_docker_access_enabled(str(socket_path)) is False
 
+    @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="UNIX domain sockets not supported on this platform")
     @pytest.mark.parametrize("flag", [None, "false"])
     def test_socket_without_explicit_opt_in_is_disabled(
         self,
@@ -301,12 +311,13 @@ class TestHostDockerAccess:
         with socket.socket(socket.AF_UNIX) as unix_socket:
             unix_socket.bind(str(socket_path))
             if flag is None:
-                monkeypatch.delenv("ODYSSEUS_ENABLE_HOST_DOCKER", raising=False)
+                monkeypatch.delenv("MAVRICK_ENABLE_HOST_DOCKER", raising=False)
             else:
-                monkeypatch.setenv("ODYSSEUS_ENABLE_HOST_DOCKER", flag)
+                monkeypatch.setenv("MAVRICK_ENABLE_HOST_DOCKER", flag)
 
             assert _host_docker_access_enabled(str(socket_path)) is False
 
+    @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="UNIX domain sockets not supported on this platform")
     def test_explicit_opt_in_with_unix_socket_is_enabled(
         self,
         monkeypatch,
@@ -315,7 +326,7 @@ class TestHostDockerAccess:
         socket_path = tmp_path / "docker.sock"
         with socket.socket(socket.AF_UNIX) as unix_socket:
             unix_socket.bind(str(socket_path))
-            monkeypatch.setenv("ODYSSEUS_ENABLE_HOST_DOCKER", "true")
+            monkeypatch.setenv("MAVRICK_ENABLE_HOST_DOCKER", "true")
 
             assert _host_docker_access_enabled(str(socket_path)) is True
 
@@ -367,7 +378,7 @@ class TestPackageProbeStatus:
 
         assert _package_installed_from_probe("vllm", probe) is True
         assert status.available is False
-        assert "outside Odysseus" in status.note
+        assert "outside Mavrick" in status.note
 
     def test_llama_cpp_is_installed_when_native_llama_server_exists(self):
         probe = {
@@ -384,14 +395,14 @@ class TestPackageProbeStatus:
         assert status.available is False
         assert "package manager or source checkout" in status.note
 
-    def test_apfel_does_not_use_generic_outside_odysseus_note(self):
+    def test_apfel_does_not_use_generic_outside_mavrick_note(self):
         status = _package_pip_update_status(
             {"name": "APFEL", "pip": "", "update_cmd": "brew upgrade apfel"},
             {"binaries": {}, "dists": {}, "modules": {}},
         )
 
         assert status.available is False
-        assert "Update this system dependency outside Odysseus." not in status.note
+        assert "Update this system dependency outside Mavrick." not in status.note
 
     def test_diffusers_requires_torch_too(self):
         missing_torch = {
@@ -418,13 +429,14 @@ class TestPackageProbeStatus:
         user_base = tmp_path / "user-base"
         monkeypatch.setattr("site.USER_BASE", str(user_base))
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
         monkeypatch.setenv("PATH", "/usr/bin")
 
         _prepend_user_install_bins_to_path()
 
-        parts = os.environ["PATH"].split(os.pathsep)
-        assert str(user_base / "bin") in parts
-        assert str(tmp_path / "home" / ".local" / "bin") in parts
+        parts = [os.path.normpath(p) for p in os.environ["PATH"].split(os.pathsep)]
+        assert os.path.normpath(str(user_base / "bin")) in parts
+        assert os.path.normpath(str(tmp_path / "home" / ".local" / "bin")) in parts
 
     def test_remote_package_probe_checks_user_install_bin(self):
         script = _package_probe_script(["vllm"])

@@ -1,9 +1,19 @@
 {
+  "name": "mavrick-desktop",
+  "version": "1.0.0",
+  "description": "MAVRICK - JARVIS-style AI agent desktop app",
+  "main": "desktop/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/pewdiepie-archdaemon/odysseus.git"
+    "url": "https://github.com/pewdiepie-archdaemon/mavrick.git"
   },
+  "dependencies": {},
   "devDependencies": {
-    "@antithesishq/bombadil": "^0.6.1"
+    "@antithesishq/bombadil": "^0.6.1",
+    "electron": "^31.0.0"
   }
 }

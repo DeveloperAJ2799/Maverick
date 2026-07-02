@@ -61,7 +61,7 @@ from routes.email_pollers import _start_poller
 
 logger = logging.getLogger(__name__)
 
-ODYSSEUS_MAIL_ORIGIN = "odysseus-ui"
+MAVRICK_MAIL_ORIGIN = "mavrick-ui"
 EMAIL_READ_ATTACHMENT_VERSION = 2
 
 
@@ -882,12 +882,12 @@ def _move_email_message(conn, uid: str, dest: str, role: str = "") -> bool:
     return False
 
 
-def _apply_odysseus_headers(msg, kind: str | None = None, ref_id: str | None = None):
-    msg["X-Odysseus-Origin"] = ODYSSEUS_MAIL_ORIGIN
+def _apply_mavrick_headers(msg, kind: str | None = None, ref_id: str | None = None):
+    msg["X-Mavrick-Origin"] = MAVRICK_MAIL_ORIGIN
     if kind:
-        msg["X-Odysseus-Kind"] = re.sub(r"[^A-Za-z0-9_.-]", "-", kind)[:64]
+        msg["X-Mavrick-Kind"] = re.sub(r"[^A-Za-z0-9_.-]", "-", kind)[:64]
     if ref_id:
-        msg["X-Odysseus-Ref"] = re.sub(r"[^A-Za-z0-9_.:-]", "-", ref_id)[:128]
+        msg["X-Mavrick-Ref"] = re.sub(r"[^A-Za-z0-9_.:-]", "-", ref_id)[:128]
 
 
 def _normalize_addr_field(field: str) -> str:
@@ -1273,7 +1273,7 @@ def setup_email_routes():
         owner_key = re.sub(r"[^A-Za-z0-9_.-]", "-", owner or "default")
         return {
             "uid": uid,
-            "message_id": f"<fixture-email-{uid}-{owner_key}@fixtures.odysseus.local>",
+            "message_id": f"<fixture-email-{uid}-{owner_key}@fixtures.mavrick.local>",
             "subject": subject,
             "from_name": sender_name or sender_addr or sender,
             "from_address": sender_addr,
@@ -1402,12 +1402,12 @@ def setup_email_routes():
                 # All emails NOT marked as answered/done (read or unread).
                 status, data = _imap_uid_search(conn, f"(UNANSWERED{from_clause})")
             elif filter_ == "reminders":
-                # Prefer the Odysseus marker header, but include the subject
-                # fallback too. The fallback uses a distinct Odysseus prefix
+                # Prefer the Mavrick marker header, but include the subject
+                # fallback too. The fallback uses a distinct Mavrick prefix
                 # so ordinary emails containing "Reminder" don't get mixed in.
                 status, data = _imap_uid_search(
                     conn,
-                    f'(OR HEADER X-Odysseus-Kind "reminder" SUBJECT "Reminder (Odysseus):"{from_clause})',
+                    f'(OR HEADER X-Mavrick-Kind "reminder" SUBJECT "Reminder (Mavrick):"{from_clause})',
                 )
             elif filter_ == "pending_30d":
                 # "What's pending in the last month" — UNANSWERED + delivered
@@ -2977,13 +2977,13 @@ def setup_email_routes():
             logger.error(f"Failed to permanently delete email {uid}: {e}")
             return {"success": False, "error": "Mail operation failed"}
 
-    @router.delete("/odysseus/reminders")
-    async def delete_odysseus_reminder_emails(
+    @router.delete("/mavrick/reminders")
+    async def delete_mavrick_reminder_emails(
         account_id: str | None = Query(None),
         permanent: bool = Query(False),
         owner: str = Depends(require_owner),
     ):
-        """Delete email messages stamped as Odysseus reminders."""
+        """Delete email messages stamped as Mavrick reminders."""
         if account_id:
             _assert_owns_account(account_id, owner)
         deleted = 0
@@ -3021,12 +3021,12 @@ def setup_email_routes():
                         # Match the Reminders filter: new messages have the
                         # explicit kind header, and subject fallback catches
                         # clients/providers that stripped custom headers.
-                        uids.update(_search_uids(conn, f'(HEADER X-Odysseus-Kind {_search_quote("reminder")})'))
-                        uids.update(_search_uids(conn, f'(SUBJECT {_search_quote("Reminder (Odysseus):")})'))
+                        uids.update(_search_uids(conn, f'(HEADER X-Mavrick-Kind {_search_quote("reminder")})'))
+                        uids.update(_search_uids(conn, f'(SUBJECT {_search_quote("Reminder (Mavrick):")})'))
                         for addr in own_addrs:
                             addr_q = _search_quote(addr)
-                            uids.update(_search_uids(conn, f'(FROM {addr_q} SUBJECT {_search_quote("Reminder (Odysseus):")})'))
-                            # Legacy reminders created before the Odysseus
+                            uids.update(_search_uids(conn, f'(FROM {addr_q} SUBJECT {_search_quote("Reminder (Mavrick):")})'))
+                            # Legacy reminders created before the Mavrick
                             # prefix still came from this mailbox as
                             # "Reminder: ..."; include them in Clear without
                             # sweeping unrelated external reminder emails.
@@ -3049,7 +3049,7 @@ def setup_email_routes():
             _invalidate_list_cache(account_id)
             return {"success": True, "deleted": deleted, "folders_checked": folders_checked}
         except Exception as e:
-            logger.error(f"delete_odysseus_reminder_emails failed: {e}")
+            logger.error(f"delete_mavrick_reminder_emails failed: {e}")
             return {"success": False, "error": "Mail operation failed"}
 
     @router.post("/move/{uid}")
@@ -3206,7 +3206,7 @@ def setup_email_routes():
 
     async def _send_email_sync(
         to, cc, bcc, subject, body, in_reply_to, references, attachments,
-        account_id=None, owner="", odysseus_kind=None, odysseus_ref=None,
+        account_id=None, owner="", mavrick_kind=None, mavrick_ref=None,
     ):
         """Shared send logic used by both /send and scheduled delivery.
 
@@ -3233,7 +3233,7 @@ def setup_email_routes():
             outer["Cc"] = cc
         outer["Subject"] = subject or ""
         outer["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
-        _apply_odysseus_headers(outer, odysseus_kind or "scheduled", odysseus_ref)
+        _apply_mavrick_headers(outer, mavrick_kind or "scheduled", mavrick_ref)
         if in_reply_to:
             outer["In-Reply-To"] = in_reply_to
         if references:
@@ -3292,7 +3292,7 @@ def setup_email_routes():
             conn = sqlite3.connect(SCHEDULED_DB)
             conn.execute("""
                 INSERT INTO scheduled_emails
-                (id, to_addr, cc, bcc, subject, body, in_reply_to, references_hdr, attachments, send_at, created_at, status, account_id, odysseus_kind, owner)
+                (id, to_addr, cc, bcc, subject, body, in_reply_to, references_hdr, attachments, send_at, created_at, status, account_id, mavrick_kind, owner)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
             """, (
                 sid,
@@ -3307,7 +3307,7 @@ def setup_email_routes():
                 send_at,
                 datetime.utcnow().isoformat(),
                 req.get("account_id") or None,
-                req.get("odysseus_kind") or "scheduled",
+                req.get("mavrick_kind") or "scheduled",
                 owner or "",
             ))
             conn.commit()
@@ -3511,14 +3511,14 @@ def setup_email_routes():
             outer["Cc"] = req.cc
         outer["Subject"] = req.subject
         outer["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
-        outer["Message-ID"] = email.utils.make_msgid(domain="odysseus.local")
+        outer["Message-ID"] = email.utils.make_msgid(domain="mavrick.local")
 
         if req.in_reply_to:
             outer["In-Reply-To"] = req.in_reply_to
         if req.references:
             outer["References"] = req.references
-        if req.odysseus_kind:
-            _apply_odysseus_headers(outer, req.odysseus_kind)
+        if req.mavrick_kind:
+            _apply_mavrick_headers(outer, req.mavrick_kind)
 
         # Plain + HTML body. Escape user content so a `<script>` or
         # `<img onerror=...>` paste in compose doesn't end up as live HTML

@@ -134,8 +134,8 @@ def test_readme_native_quickstart_uses_loopback():
 def test_ollama_cookbook_runner_does_not_force_public_bind():
     route = Path("routes/cookbook_routes.py").read_text(encoding="utf-8")
     cookbook_js = Path("static/js/cookbook.js").read_text(encoding="utf-8")
-    assert 'OLLAMA_HOST="0.0.0.0:${ODYSSEUS_OLLAMA_PORT}" ollama serve' not in route
-    assert 'OLLAMA_HOST="${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT}" ollama serve' in route
+    assert 'OLLAMA_HOST="0.0.0.0:${MAVRICK_OLLAMA_PORT}" ollama serve' not in route
+    assert 'OLLAMA_HOST="${MAVRICK_OLLAMA_HOST}:${MAVRICK_OLLAMA_PORT}" ollama serve' in route
     assert '_ollama_default_host = "0.0.0.0" if remote else "127.0.0.1"' in route
     assert "WARNING: remote Ollama will bind" in route
     assert "OLLAMA_HOST=0.0.0.0:${ollamaPort}" not in cookbook_js
@@ -540,26 +540,26 @@ def test_require_user_rejects_unauthenticated(monkeypatch):
 
 
 def test_inprocess_pollers_gate(monkeypatch):
-    """The ODYSSEUS_INPROCESS_POLLERS env var must let operators kill
+    """The MAVRICK_INPROCESS_POLLERS env var must let operators kill
     the asyncio pollers when cron / systemd is driving the one-shot
-    `odysseus-mail poll-*` CLI subcommands instead. Two pollers racing
+    `mavrick-mail poll-*` CLI subcommands instead. Two pollers racing
     on the same SQLite would mark scheduled rows as 'sent' twice."""
     import sys as _sys
     _sys.modules.pop("routes.email_pollers", None)
     from routes.email_pollers import _inprocess_pollers_enabled  # noqa: WPS433
 
     # Defaults to enabled (preserves single-process deployments).
-    monkeypatch.delenv("ODYSSEUS_INPROCESS_POLLERS", raising=False)
+    monkeypatch.delenv("MAVRICK_INPROCESS_POLLERS", raising=False)
     assert _inprocess_pollers_enabled() is True
 
     # Any of the off-values disables.
     for off in ("0", "false", "no", "off", "FALSE", "Off"):
-        monkeypatch.setenv("ODYSSEUS_INPROCESS_POLLERS", off)
+        monkeypatch.setenv("MAVRICK_INPROCESS_POLLERS", off)
         assert _inprocess_pollers_enabled() is False, f"{off!r} should disable"
 
     # Explicit on-values stay enabled.
     for on in ("1", "true", "yes", "anything-truthy"):
-        monkeypatch.setenv("ODYSSEUS_INPROCESS_POLLERS", on)
+        monkeypatch.setenv("MAVRICK_INPROCESS_POLLERS", on)
         assert _inprocess_pollers_enabled() is True, f"{on!r} should enable"
 
 
@@ -778,7 +778,7 @@ def test_auth_manager_migrates_legacy_admin_role(tmp_path):
     mgr = AuthManager(str(auth_path))
 
     assert mgr.is_admin("admin") is True
-    data = json.loads(auth_path.read_text())
+    data = json.loads(auth_path.read_text(encoding="utf-8"))
     assert data["users"]["admin"]["is_admin"] is True
 
 
@@ -794,7 +794,7 @@ def _load_search_content_for_test(monkeypatch, name="services.search.content_und
     analytics.RateLimitError = RuntimeError
     analytics.error_logger = _types.SimpleNamespace(error=lambda *a, **k: None)
     cache = _types.ModuleType("services.search.cache")
-    cache.CONTENT_CACHE_DIR = Path("/tmp/odysseus-test-content-cache")
+    cache.CONTENT_CACHE_DIR = Path("/tmp/mavrick-test-content-cache")
     cache.content_cache_index = {}
     cache.generate_cache_key = lambda url: "test-cache-key"
     cache.cleanup_cache = lambda: None
@@ -836,7 +836,7 @@ def test_web_content_fetcher_blocks_dns_to_private(monkeypatch):
 def test_mcp_config_listing_is_admin_gated():
     from routes import mcp_routes
 
-    src = Path(mcp_routes.__file__).read_text()
+    src = Path(mcp_routes.__file__).read_text(encoding="utf-8")
     assert "def list_servers(request: Request):" in src
     assert "def list_tools(request: Request):" in src
     assert "def list_server_tools(server_id: str, request: Request):" in src
@@ -955,7 +955,7 @@ def test_diagnostics_routes_are_admin_gated():
     """db/rag stats + test endpoints must require admin (they relied only on
     the global session check before)."""
     src = Path(__file__).resolve().parents[1] / "routes" / "diagnostics_routes.py"
-    text = src.read_text()
+    text = src.read_text(encoding="utf-8")
     for handler in ("get_database_stats", "get_rag_stats", "test_youtube", "test_research"):
         assert f"def {handler}(request: Request" in text, handler
     assert text.count("require_admin(request)") >= 4
@@ -965,7 +965,7 @@ def test_email_thread_rendering_sanitizes_body_html():
     """Both threaded render paths must run server-parsed body_html through the
     allowlist sanitizer (the flat path already did)."""
     src = Path(__file__).resolve().parents[1] / "static" / "js" / "emailLibrary.js"
-    text = src.read_text()
+    text = src.read_text(encoding="utf-8")
     # every `t.body_html` reference is wrapped by _sanitizeHtml(...)
     assert text.count("t.body_html") == text.count("_sanitizeHtml(t.body_html")
     assert "t.body_html" in text  # guard against the file being refactored away
@@ -973,7 +973,7 @@ def test_email_thread_rendering_sanitizes_body_html():
 
 def test_session_html_export_escapes_name():
     src = Path(__file__).resolve().parents[1] / "routes" / "session_routes.py"
-    text = src.read_text()
+    text = src.read_text(encoding="utf-8")
     assert "safe_title = html.escape(session.name" in text
     assert "<title>{session.name}" not in text
     assert "<h1>{session.name}</h1>" not in text
@@ -981,7 +981,7 @@ def test_session_html_export_escapes_name():
 
 def test_mcp_oauth_page_escapes_reflected_values():
     src = Path(__file__).resolve().parents[1] / "routes" / "mcp_routes.py"
-    text = src.read_text()
+    text = src.read_text(encoding="utf-8")
     body = text.split("def _oauth_authorize_page(", 1)[1].split("return f", 1)[0]
     for var in ("auth_url", "server_id", "host", "redirect_uri"):
         assert f"{var} = html.escape({var}" in body, var
@@ -993,14 +993,14 @@ def _import_mcp_routes():
 
 
 def test_google_mcp_oauth_uses_configured_redirect_base(monkeypatch):
-    monkeypatch.setenv("OAUTH_REDIRECT_BASE_URL", "https://odysseus.example/app/")
+    monkeypatch.setenv("OAUTH_REDIRECT_BASE_URL", "https://mavrick.example/app/")
     monkeypatch.delenv("APP_PUBLIC_URL", raising=False)
     sys.modules.pop("src.mcp_oauth", None)
     mcp_routes = _import_mcp_routes()
 
     assert (
         mcp_routes._mcp_oauth_redirect_uri()
-        == "https://odysseus.example/app/api/mcp/oauth/callback"
+        == "https://mavrick.example/app/api/mcp/oauth/callback"
     )
 
 
@@ -1063,7 +1063,7 @@ def test_mcp_oauth_config_sanitizes_paths_and_env(tmp_path, monkeypatch):
 
 def test_gmail_mcp_preset_uses_contained_oauth_paths():
     src = Path(__file__).resolve().parents[1] / "static" / "js" / "admin.js"
-    text = src.read_text()
+    text = src.read_text(encoding="utf-8")
     preset = text.split('{ name: "Gmail"', 1)[1].split('{ name: "Email (IMAP/SMTP)"', 1)[0]
 
     assert "~/.gmail-mcp" not in preset
@@ -1147,7 +1147,7 @@ def test_chat_active_document_lookup_is_owner_scoped():
     import re
 
     src = Path(__file__).resolve().parents[1] / "routes" / "chat_routes.py"
-    text = src.read_text()
+    text = src.read_text(encoding="utf-8")
     # The frontend-supplied id is resolved through the shared owner filter.
     assert "_owner_session_filter(_doc_q, ctx.user)" in text
     assert "_owner_session_filter(_session_doc_q, ctx.user)" in text

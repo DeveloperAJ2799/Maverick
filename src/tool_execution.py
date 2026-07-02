@@ -76,6 +76,7 @@ def _is_sensitive_path(resolved: str) -> bool:
     """Return True if *resolved* falls under a sensitive directory or
     matches a sensitive filename — regardless of what root it sits under.
     """
+    resolved = resolved.replace("/", os.sep)
     parts = resolved.split(os.sep)
     filenames: set[str] = {parts[-1]} if parts else set()
 
@@ -116,6 +117,10 @@ def _tool_path_roots() -> list[str]:
     tmpdir = os.environ.get("TMPDIR")
     if tmpdir:
         roots.append(tmpdir)
+
+    # System temp directory (gets temp path dynamically on Windows/Unix)
+    import tempfile
+    roots.append(tempfile.gettempdir())
 
     # Opt-in extra roots from settings.
     try:
@@ -328,7 +333,7 @@ _MCP_TOOL_MAP = {
     "web_fetch":      ("web_fetch",  "web_fetch"),
     "generate_image": ("image_gen",  "generate_image"),
 }
-_EMAIL_MCP_OWNER_ARG = "_odysseus_owner"
+_EMAIL_MCP_OWNER_ARG = "_mavrick_owner"
 
 
 def _parse_qualified_mcp_args(tool: str, content: str) -> tuple[Dict, Optional[str]]:

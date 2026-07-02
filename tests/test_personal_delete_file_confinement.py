@@ -1,5 +1,7 @@
 import asyncio
 import os
+import sys
+import pytest
 from pathlib import Path
 
 from routes import personal_routes
@@ -30,6 +32,7 @@ def _delete_endpoint(personal_docs):
     raise AssertionError("DELETE /api/personal/file endpoint not found")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks require admin/developer mode on Windows")
 def test_delete_file_refuses_symlink_directory_escape(tmp_path, monkeypatch):
     uploads = tmp_path / "uploads"
     uploads.mkdir()

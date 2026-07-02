@@ -45,7 +45,7 @@ def _fake_sysctl(brand="Apple M2 Pro", memsize_gb=32, wired_mb=None, display_jso
 
 def test_mlx_models_hidden_on_metal():
     """MLX-quantized models can't be served by llama.cpp or Ollama (the only
-    Metal-capable engines Odysseus generates), so they must never be recommended
+    Metal-capable engines Mavrick generates), so they must never be recommended
     on Apple Silicon — even though the catalog tags them as Apple-only."""
     results = rank_models(_metal_system(), limit=900)
     mlx = [m for m in results if str(m.get("quant", "")).startswith("mlx-")]
@@ -182,6 +182,7 @@ def test_detect_system_propagates_unified_memory(monkeypatch):
         "gpus": [], "gpu_groups": [], "homogeneous": True,
         "backend": "metal", "unified_memory": True, "gpu_cores": 10,
     })
+    monkeypatch.setattr(hardware, "_detect_windows", lambda: None)
     monkeypatch.setattr(hardware, "_get_ram_gb", lambda: 16.0)
     monkeypatch.setattr(hardware, "_get_available_ram_gb", lambda: 11.0)
     monkeypatch.setattr(hardware, "_get_cpu_count", lambda: 10)
