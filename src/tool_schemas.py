@@ -169,6 +169,23 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "generate_pdf",
+            "description": "Generate a formatted PDF file from markdown or plain text. Supports headings (# ## ###), bullet lists (- *), numbered lists, bold (**text**), italic (*text*), inline code (`code`), tables (| col | col |), horizontal rules (---), code blocks (```), and block quotes (>). Use this whenever the user asks to create, export, or save a PDF. The PDF is written directly to disk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Output file path, e.g. ~/report.pdf or /home/user/docs/report.pdf"},
+                    "content": {"type": "string", "description": "Full markdown or plain-text content to render into the PDF"},
+                    "title": {"type": "string", "description": "Optional PDF document title (metadata)"},
+                    "author": {"type": "string", "description": "Optional PDF author (metadata)"}
+                },
+                "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "edit_file",
             "description": "Edit a file ON DISK by exact string replacement (home folder, project files, any real path like ~/sweden.txt or /path/to/file). This is the right tool for files on disk — NOT edit_document (that's for editor-panel documents). PREFER this over bash (sed/echo) — it shows a diff. old_string must match the file exactly and be unique (or set replace_all). Use write_file to create a new file.",
             "parameters": {
@@ -1350,6 +1367,8 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = ""
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")
+    elif tool_type == "generate_pdf":
+        content = json.dumps(args)
     elif tool_type == "edit_file":
         content = json.dumps(args)
     elif tool_type == "create_document":

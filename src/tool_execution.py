@@ -395,6 +395,7 @@ _MCP_ARG_PARSERS: Dict[str, Callable[[str], Dict[str, str]]] = {
     "web_fetch":      lambda c: {"url": c.split("\n")[0].strip()},
     "read_file":      lambda c: {"path": c.split("\n")[0].strip()},
     "write_file":     _parse_write_file,
+    "generate_pdf":   lambda c: json.loads(c) if c.strip().startswith("{") else {"path": c.split("\n")[0].strip(), "content": c.split("\n", 1)[1] if "\n" in c else ""},
     "generate_image": _parse_generate_image,
     "manage_memory":  _parse_manage_memory,
 }
@@ -422,6 +423,7 @@ _MCP_JSON_PRIMARY_KEYS: Dict[str, tuple] = {
     "web_fetch":      ("url",),
     "read_file":      ("path",),
     "write_file":     ("path",),
+    "generate_pdf":   ("path",),
     "generate_image": ("prompt",),
 }
 

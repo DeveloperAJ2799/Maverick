@@ -477,3 +477,235 @@ class GetWorkspaceTool:
                       "resolve paths from the user or use absolute paths.",
             "exit_code": 0,
         }
+
+
+class GeneratePdfTool:
+    """Generate a PDF from markdown or plain text content using reportlab.
+    The PDF is written to the given path on disk."""
+
+    async def execute(self, content: str, ctx: dict) -> dict:  # noqa: C901
+        import asyncio
+        from src.tool_execution import _resolve_tool_path
+
+        # --- parse args ---
+        args: dict = {}
+        _s = (content or "").strip()
+        if _s.startswith("{"):
+            try:
+                args = json.loads(_s)
+            except json.JSONDecodeError:
+                pass
+        if not args:
+            # fallback: first line = path, rest = content
+            lines = _s.split("\n", 1)
+            args = {"path": lines[0].strip(), "content": lines[1] if len(lines) > 1 else ""}
+
+        raw_path = str(args.get("path", "")).strip()
+        md_text  = str(args.get("content", "")).strip()
+        title    = str(args.get("title", "Document")).strip()
+        author   = str(args.get("author", "MAVRICK")).strip()
+
+        if not raw_path:
+            return {"error": "generate_pdf: 'path' is required", "exit_code": 1}
+        if not md_path_ends_pdf(raw_path):
+            raw_path = raw_path.rstrip("/\\") + ".pdf"
+
+        try:
+            path = _resolve_tool_path(raw_path)
+        except ValueError as e:
+            return {"error": f"generate_pdf: {e}", "exit_code": 1}
+
+        def _build_pdf():
+            try:
+                from reportlab.lib.pagesizes import letter
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib.units import inch
+                from reportlab.lib import colors
+                from reportlab.platypus import (
+                    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+                    HRFlowable, PageBreak,
+                )
+                from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT
+            except ImportError:
+                return None, "reportlab is not installed. Run: pip install reportlab"
+
+            import os
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+            doc = SimpleDocTemplate(
+                path,
+                pagesize=letter,
+                rightMargin=inch,
+                leftMargin=inch,
+                topMargin=inch,
+                bottomMargin=inch,
+                title=title,
+                author=author,
+            )
+
+            styles = getSampleStyleSheet()
+            # Custom styles
+            h1_style = ParagraphStyle("H1", parent=styles["Heading1"],
+                                      fontSize=18, spaceAfter=8, spaceBefore=12,
+                                      textColor=colors.HexColor("#2c3e50"))
+            h2_style = ParagraphStyle("H2", parent=styles["Heading2"],
+                                      fontSize=14, spaceAfter=6, spaceBefore=10,
+                                      textColor=colors.HexColor("#2c3e50"))
+            h3_style = ParagraphStyle("H3", parent=styles["Heading3"],
+                                      fontSize=12, spaceAfter=4, spaceBefore=8,
+                                      textColor=colors.HexColor("#34495e"))
+            body_style = ParagraphStyle("Body", parent=styles["Normal"],
+                                        fontSize=11, leading=16, alignment=TA_JUSTIFY,
+                                        spaceAfter=6)
+            bullet_style = ParagraphStyle("Bullet", parent=body_style,
+                                          leftIndent=20, bulletIndent=10,
+                                          spaceAfter=3)
+            code_style = ParagraphStyle("Code", parent=styles["Code"],
+                                        fontSize=9, fontName="Courier",
+                                        backColor=colors.HexColor("#f4f4f4"),
+                                        borderColor=colors.HexColor("#cccccc"),
+                                        borderWidth=0.5, borderPadding=4,
+                                        spaceAfter=6)
+            meta_style = ParagraphStyle("Meta", parent=styles["Normal"],
+                                        fontSize=10, textColor=colors.HexColor("#666666"),
+                                        alignment=TA_CENTER, spaceAfter=12)
+
+            story = []
+            in_code_block = False
+            code_lines: list = []
+
+            def flush_code():
+                if code_lines:
+                    code_text = "\n".join(code_lines).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    story.append(Paragraph(code_text.replace("\n", "<br/>"), code_style))
+                    story.append(Spacer(1, 4))
+                code_lines.clear()
+
+            def html_escape(s: str) -> str:
+                return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+            def parse_inline(s: str) -> str:
+                """Convert **bold**, *italic*, `code` to reportlab XML."""
+                import re
+                s = html_escape(s)
+                s = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', s)
+                s = re.sub(r'\*(.+?)\*', r'<i>\1</i>', s)
+                s = re.sub(r'`(.+?)`', r'<font name="Courier" size="9" color="#c0392b">\1</font>', s)
+                return s
+
+            for raw_line in md_text.splitlines():
+                line = raw_line.rstrip()
+
+                # Code block toggle
+                if line.startswith("```"):
+                    if in_code_block:
+                        flush_code()
+                        in_code_block = False
+                    else:
+                        in_code_block = True
+                    continue
+
+                if in_code_block:
+                    code_lines.append(raw_line)
+                    continue
+
+                # Headings
+                if line.startswith("# "):
+                    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#2c3e50")))
+                    story.append(Paragraph(parse_inline(line[2:]), h1_style))
+                elif line.startswith("## "):
+                    story.append(Paragraph(parse_inline(line[3:]), h2_style))
+                    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#bdc3c7")))
+                    story.append(Spacer(1, 2))
+                elif line.startswith("### "):
+                    story.append(Paragraph(parse_inline(line[4:]), h3_style))
+                # Horizontal rule
+                elif line.strip() in ("---", "***", "___"):
+                    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#cccccc")))
+                    story.append(Spacer(1, 4))
+                # Page break marker
+                elif line.strip().startswith("<!-- pagebreak") or line.strip() == "\\pagebreak":
+                    story.append(PageBreak())
+                # Bullet lists
+                elif line.startswith("- ") or line.startswith("* "):
+                    story.append(Paragraph("• " + parse_inline(line[2:]), bullet_style))
+                elif len(line) > 2 and line[0].isdigit() and line[1] in ".)" and line[2] == " ":
+                    story.append(Paragraph(parse_inline(line), bullet_style))
+                # Block quote
+                elif line.startswith("> "):
+                    bq = ParagraphStyle("BQ", parent=body_style, leftIndent=24,
+                                        borderColor=colors.HexColor("#2c3e50"),
+                                        borderWidth=2, borderPadding=(2, 0, 2, 8),
+                                        textColor=colors.HexColor("#555555"))
+                    story.append(Paragraph(parse_inline(line[2:]), bq))
+                # Table (simple | col | col |)
+                elif "|" in line and line.strip().startswith("|"):
+                    cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                    # Skip separator rows
+                    if all(set(c) <= set("-: ") for c in cells):
+                        continue
+                    if not hasattr(GeneratePdfTool, "_table_data"):
+                        GeneratePdfTool._table_data = []
+                    GeneratePdfTool._table_data.append(cells)
+                    continue
+                else:
+                    # Flush table if we were building one
+                    if hasattr(GeneratePdfTool, "_table_data") and GeneratePdfTool._table_data:
+                        td = GeneratePdfTool._table_data
+                        GeneratePdfTool._table_data = []
+                        if td:
+                            tbl = Table(td, repeatRows=1)
+                            tbl.setStyle(TableStyle([
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+                                ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+                                ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+                                ("FONTSIZE",   (0, 0), (-1, -1), 9),
+                                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f9fa")]),
+                                ("GRID",       (0, 0), (-1, -1), 0.5, colors.HexColor("#bdc3c7")),
+                                ("VALIGN",     (0, 0), (-1, -1), "TOP"),
+                                ("PADDING",    (0, 0), (-1, -1), 5),
+                            ]))
+                            story.append(tbl)
+                            story.append(Spacer(1, 6))
+
+                    if line.strip():
+                        story.append(Paragraph(parse_inline(line), body_style))
+                    else:
+                        story.append(Spacer(1, 6))
+
+            # Flush any remaining table
+            if hasattr(GeneratePdfTool, "_table_data") and GeneratePdfTool._table_data:
+                td = GeneratePdfTool._table_data
+                GeneratePdfTool._table_data = []
+                tbl = Table(td, repeatRows=1)
+                tbl.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+                    ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE",   (0, 0), (-1, -1), 9),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f9fa")]),
+                    ("GRID",       (0, 0), (-1, -1), 0.5, colors.HexColor("#bdc3c7")),
+                    ("VALIGN",     (0, 0), (-1, -1), "TOP"),
+                    ("PADDING",    (0, 0), (-1, -1), 5),
+                ]))
+                story.append(tbl)
+
+            # Flush any open code block
+            if in_code_block:
+                flush_code()
+
+            doc.build(story)
+            return os.path.getsize(path), None
+
+        size, err = await asyncio.to_thread(_build_pdf)
+        if err:
+            return {"error": f"generate_pdf: {err}", "exit_code": 1}
+        return {
+            "output": f"PDF created: {path} ({size:,} bytes)",
+            "path": path,
+            "exit_code": 0,
+        }
+
+
+def md_path_ends_pdf(p: str) -> bool:
+    return p.lower().endswith(".pdf")

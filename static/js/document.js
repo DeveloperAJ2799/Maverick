@@ -9111,8 +9111,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (isForm) options.push({ label: 'Filled PDF (.pdf)', fn: _downloadFilledPdf });
     options.push(
       { label: 'Export Markdown', fn: exportDocument },
-      { label: 'Print as PDF', fn: exportAsPdf },
+      { label: 'Export as PDF', fn: exportAsPdf },
       { label: 'Export as Word', fn: exportAsDocx },
+      { label: 'Export as PowerPoint', fn: exportAsPptx },
     );
 
     options.forEach(opt => {
@@ -9176,12 +9177,100 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       if (uiModule) uiModule.showError('Failed to load PDF library');
       return;
     }
-    const lang = document.getElementById('doc-language-select')?.value || '';
     const text = textarea.value || '';
-    // Render content as HTML for PDF
+    const lang = document.getElementById('doc-language-select')?.value || '';
+
+    // Use jsPDF vector text for markdown/code content (selectable text, not rasterized)
+    // Fall back to html2canvas only for content with images or complex HTML
+    if (lang === 'markdown' || lang === 'text' || lang === '') {
+      const { jsPDF } = window.jspdf || window.html2pdf?.().constructor?.prototype?.jsPDF || {};
+      if (!jsPDF) { _exportAsPdfFallback(text, lang); return; }
+
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 15;
+      const maxW = pageW - margin * 2;
+      let y = margin;
+
+      function addPage() { doc.addPage(); y = margin; }
+
+      const lines = text.split('\n');
+      for (const line of lines) {
+        if (y > pageH - margin) addPage();
+
+        // Headings
+        const h1 = line.match(/^# (.+)/);
+        const h2 = line.match(/^## (.+)/);
+        const h3 = line.match(/^### (.+)/);
+        const h4 = line.match(/^#### (.+)/);
+        if (h1) { y += 4; doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.text(h1[1], margin, y); y += 10; continue; }
+        if (h2) { y += 3; doc.setFont('helvetica', 'bold'); doc.setFontSize(17); doc.text(h2[1], margin, y); y += 8; continue; }
+        if (h3) { y += 2; doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.text(h3[1], margin, y); y += 7; continue; }
+        if (h4) { y += 1; doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(h4[1], margin, y); y += 6; continue; }
+
+        // Code blocks (monospace)
+        if (line.trimStart().startsWith('```')) {
+          doc.setFont('courier', 'normal'); doc.setFontSize(9);
+          doc.setFillColor(245, 245, 245);
+          doc.rect(margin - 2, y - 3.5, maxW + 4, 5, 'F');
+          doc.text(line.trimStart().slice(3) || ' ', margin, y);
+          y += 5; continue;
+        }
+
+        // Bullet lists
+        const bulletMatch = line.match(/^(\s*)[-*]\s+(.+)/);
+        if (bulletMatch) {
+          const indent = Math.min(bulletMatch[1].length * 2, 12);
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+          doc.text('•', margin + indent, y);
+          const wrapped = doc.splitTextToSize(bulletMatch[2], maxW - indent - 6);
+          doc.text(wrapped, margin + indent + 5, y);
+          y += wrapped.length * 4.5; continue;
+        }
+
+        // Numbered lists
+        const numMatch = line.match(/^(\s*)(\d+[.)])\s+(.+)/);
+        if (numMatch) {
+          const indent = Math.min(numMatch[1].length * 2, 12);
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+          doc.text(numMatch[2], margin + indent, y);
+          const wrapped = doc.splitTextToSize(numMatch[3], maxW - indent - 10);
+          doc.text(wrapped, margin + indent + 8, y);
+          y += wrapped.length * 4.5; continue;
+        }
+
+        // Horizontal rule
+        if (/^[-*_]{3,}$/.test(line.trim())) {
+          doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.3);
+          doc.line(margin, y, pageW - margin, y); y += 3; continue;
+        }
+
+        // Empty line
+        if (!line.trim()) { y += 3; continue; }
+
+        // Regular paragraph with inline formatting
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+        // Strip inline markdown for basic rendering
+        let clean = line.replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1').replace(/`(.+?)`/g, '$1');
+        const wrapped = doc.splitTextToSize(clean, maxW);
+        doc.text(wrapped, margin, y);
+        y += wrapped.length * 4.5;
+      }
+
+      const baseName = _getExportBaseName();
+      doc.save(baseName + '.pdf');
+      if (uiModule) uiModule.showToast('Exported PDF');
+    } else {
+      // Non-markdown: use html2canvas fallback
+      _exportAsPdfFallback(text, lang);
+    }
+  }
+
+  function _exportAsPdfFallback(text, lang) {
     let html;
     if (lang === 'markdown' && markdownModule?.mdToHtml) {
-      html = markdownModule.mdToHtml(text, { shortcodes: false }); // export: keep :shortcodes: literal
+      html = markdownModule.mdToHtml(text, { shortcodes: false });
     } else {
       html = '<pre style="white-space:pre-wrap;font-size:11px;font-family:monospace;color:#000;background:#fff;">' +
         text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre>';
@@ -9211,31 +9300,160 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       return;
     }
     const text = textarea.value || '';
-    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = window.docx;
-    // Parse text into paragraphs, handle markdown headings
-    const paragraphs = text.split('\n').map(line => {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow,
+            TableCell, WidthType, AlignmentType, BorderStyle, ShadingType,
+            ExternalHyperlink, TabStopPosition, TabStopType } = window.docx;
+    const paragraphs = [];
+    const lines = text.split('\n');
+    let i = 0;
+
+    function parseInlineMarkdown(line) {
+      // Parse bold, italic, inline code, strikethrough, links
+      const runs = [];
+      const regex = /(\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+      let lastIdx = 0;
+      let m;
+      while ((m = regex.exec(line)) !== null) {
+        if (m.index > lastIdx) {
+          runs.push(new TextRun(line.slice(lastIdx, m.index)));
+        }
+        const segment = m[0];
+        if (segment.startsWith('**') && segment.endsWith('**')) {
+          runs.push(new TextRun({ text: segment.slice(2, -2), bold: true }));
+        } else if (segment.startsWith('*') && segment.endsWith('*')) {
+          runs.push(new TextRun({ text: segment.slice(1, -1), italics: true }));
+        } else if (segment.startsWith('~~') && segment.endsWith('~~')) {
+          runs.push(new TextRun({ text: segment.slice(2, -2), strike: true }));
+        } else if (segment.startsWith('`') && segment.endsWith('`')) {
+          runs.push(new TextRun({ text: segment.slice(1, -1), font: 'Courier New', size: 20,
+            shading: { type: ShadingType.SOLID, color: 'E8E8E8', fill: 'E8E8E8' } }));
+        } else if (segment.startsWith('[')) {
+          const linkMatch = segment.match(/\[([^\]]+)\]\(([^)]+)\)/);
+          if (linkMatch) {
+            runs.push(new ExternalHyperlink({ link: linkMatch[2], children: [
+              new TextRun({ text: linkMatch[1], style: 'Hyperlink' })
+            ]}));
+          }
+        }
+        lastIdx = m.index + segment.length;
+      }
+      if (lastIdx < line.length) {
+        runs.push(new TextRun(line.slice(lastIdx)));
+      }
+      return runs.length > 0 ? runs : [new TextRun(line)];
+    }
+
+    // Helper: create a table from collected rows
+    function makeTable(rows) {
+      if (rows.length === 0) return null;
+      const colCount = rows[0].length;
+      const colW = Math.floor(9000 / colCount);
+      const tableRows = rows.map((row, ri) => new TableRow({
+        children: row.map(cell => new TableCell({
+          children: [new Paragraph({ children: parseInlineMarkdown(cell) })],
+          width: { size: colW, type: WidthType.DXA },
+          shading: ri === 0 ? { type: ShadingType.SOLID, color: '4472C4', fill: '4472C4' } : undefined,
+        })),
+      }));
+      return new Table({ rows: tableRows, width: { size: 9000, type: WidthType.DXA } });
+    }
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Fenced code blocks
+      if (line.trimStart().startsWith('```')) {
+        const codeLines = [];
+        i++;
+        while (i < lines.length && !lines[i].trimStart().startsWith('```')) {
+          codeLines.push(lines[i]);
+          i++;
+        }
+        i++; // skip closing ```
+        for (const cl of codeLines) {
+          paragraphs.push(new Paragraph({
+            children: [new TextRun({ text: cl || ' ', font: 'Courier New', size: 19 })],
+            spacing: { before: 0, after: 0 },
+            shading: { type: ShadingType.SOLID, color: 'F5F5F5', fill: 'F5F5F5' },
+          }));
+        }
+        continue;
+      }
+
+      // Headings
       const h1 = line.match(/^# (.+)/);
       const h2 = line.match(/^## (.+)/);
       const h3 = line.match(/^### (.+)/);
-      if (h1) return new Paragraph({ text: h1[1], heading: HeadingLevel.HEADING_1 });
-      if (h2) return new Paragraph({ text: h2[1], heading: HeadingLevel.HEADING_2 });
-      if (h3) return new Paragraph({ text: h3[1], heading: HeadingLevel.HEADING_3 });
-      // Handle bold/italic
-      const runs = [];
-      const parts = line.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/);
-      for (const part of parts) {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          runs.push(new TextRun({ text: part.slice(2, -2), bold: true }));
-        } else if (part.startsWith('*') && part.endsWith('*')) {
-          runs.push(new TextRun({ text: part.slice(1, -1), italics: true }));
-        } else {
-          runs.push(new TextRun(part));
+      const h4 = line.match(/^#### (.+)/);
+      if (h1) { paragraphs.push(new Paragraph({ text: h1[1], heading: HeadingLevel.HEADING_1 })); i++; continue; }
+      if (h2) { paragraphs.push(new Paragraph({ text: h2[1], heading: HeadingLevel.HEADING_2 })); i++; continue; }
+      if (h3) { paragraphs.push(new Paragraph({ text: h3[1], heading: HeadingLevel.HEADING_3 })); i++; continue; }
+      if (h4) { paragraphs.push(new Paragraph({ text: h4[1], heading: HeadingLevel.HEADING_4 })); i++; continue; }
+
+      // Tables
+      if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+        const tableRows = [];
+        while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+          const row = lines[i].trim();
+          if (/^\|[\s-:|]+\|$/.test(row)) { i++; continue; } // skip separator
+          tableRows.push(row.split('|').slice(1, -1).map(c => c.trim()));
+          i++;
         }
+        const tbl = makeTable(tableRows);
+        if (tbl) { paragraphs.push(tbl); paragraphs.push(new Paragraph('')); }
+        continue;
       }
-      return new Paragraph({ children: runs });
-    });
+
+      // Bullet lists
+      const bulletMatch = line.match(/^(\s*)[-*]\s+(.+)/);
+      if (bulletMatch) {
+        const level = Math.min(Math.floor(bulletMatch[1].length / 2), 3);
+        paragraphs.push(new Paragraph({
+          children: parseInlineMarkdown(bulletMatch[2]),
+          bullet: { level },
+        }));
+        i++;
+        continue;
+      }
+
+      // Numbered lists
+      const numMatch = line.match(/^(\s*)\d+[.)]\s+(.+)/);
+      if (numMatch) {
+        const level = Math.min(Math.floor(numMatch[1].length / 2), 3);
+        paragraphs.push(new Paragraph({
+          children: parseInlineMarkdown(numMatch[2]),
+          numbering: { reference: 'default-numbering', level },
+        }));
+        i++;
+        continue;
+      }
+
+      // Horizontal rule
+      if (/^[-*_]{3,}$/.test(line.trim())) {
+        paragraphs.push(new Paragraph({
+          border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' } },
+          spacing: { before: 120, after: 120 },
+        }));
+        i++;
+        continue;
+      }
+
+      // Empty line
+      if (!line.trim()) { i++; continue; }
+
+      // Regular paragraph with inline formatting
+      paragraphs.push(new Paragraph({ children: parseInlineMarkdown(line) }));
+      i++;
+    }
 
     const doc = new Document({
+      numbering: {
+        config: [{
+          reference: 'default-numbering',
+          levels: [{ level: 0, format: 'decimal', text: '%1.', alignment: AlignmentType.LEFT },
+                   { level: 1, format: 'lowerLetter', text: '%2)', alignment: AlignmentType.LEFT }],
+        }],
+      },
       sections: [{ children: paragraphs }],
     });
     const blob = await Packer.toBlob(doc);
@@ -9246,6 +9464,152 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     a.click();
     URL.revokeObjectURL(a.href);
     if (uiModule) uiModule.showToast('Exported as DOCX');
+  }
+
+  // ── PPTX Export ──────────────────────────────────────────────────────
+
+  let _pptxReady = null;
+  function ensurePptxGen() {
+    if (_pptxReady) return _pptxReady;
+    if (window.PptxGenJS) return (_pptxReady = Promise.resolve());
+    _pptxReady = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '/static/lib/pptxgenjs.bundle.min.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Failed to load PPTX library'));
+      document.head.appendChild(s);
+    });
+    return _pptxReady;
+  }
+
+  function _parseMdToPptxSlides(md) {
+    const lines = (md || '').split('\n');
+    const slides = [];
+    let current = null;
+    for (const line of lines) {
+      const h1 = line.match(/^# (.+)/);
+      const h2 = line.match(/^## (.+)/);
+      if (h1 || h2) {
+        if (current) slides.push(current);
+        current = { title: (h1 ? h1[1] : h2[1]).trim(), bodyLines: [] };
+      } else if (current) {
+        current.bodyLines.push(line);
+      } else if (line.trim()) {
+        if (!current) current = { title: '', bodyLines: [] };
+        current.bodyLines.push(line);
+      }
+    }
+    if (current) slides.push(current);
+    if (slides.length === 0) slides.push({ title: 'Document', bodyLines: lines });
+    if (slides[0] && !slides[0].title && slides[0].bodyLines.length > 0) {
+      slides[0].title = slides[0].bodyLines.shift().trim() || 'Document';
+    }
+    return slides.map(s => ({ title: s.title, body: s.bodyLines.join('\n') }));
+  }
+
+  function _parsePptxBody(body) {
+    const lines = body.split('\n');
+    const items = [];
+    let inCode = false, codeLines = [];
+    for (const line of lines) {
+      if (line.trimStart().startsWith('```')) {
+        if (inCode) { items.push({ type: 'code', text: codeLines.join('\n') }); codeLines = []; inCode = false; }
+        else { inCode = true; }
+        continue;
+      }
+      if (inCode) { codeLines.push(line); continue; }
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (/^\|[\s-:|]+\|$/.test(trimmed)) continue;
+      if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+        const cells = trimmed.split('|').slice(1, -1).map(c => c.trim());
+        items.push({ type: 'table-row', cells });
+        continue;
+      }
+      const bulletMatch = trimmed.match(/^[-*]\s+(.+)/);
+      if (bulletMatch) { items.push({ type: 'bullet', text: bulletMatch[1] }); continue; }
+      const numMatch = trimmed.match(/^\d+[.)]\s+(.+)/);
+      if (numMatch) { items.push({ type: 'bullet', text: numMatch[1] }); continue; }
+      if (/^[-*_]{3,}$/.test(trimmed)) continue;
+      items.push({ type: 'text', text: trimmed.replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1').replace(/`(.+?)`/g, '$1') });
+    }
+    if (inCode && codeLines.length) items.push({ type: 'code', text: codeLines.join('\n') });
+    return items;
+  }
+
+  async function exportAsPptx() {
+    if (!activeDocId) return;
+    const textarea = document.getElementById('doc-editor-textarea');
+    if (!textarea) return;
+    try {
+      await ensurePptxGen();
+    } catch (e) {
+      if (uiModule) uiModule.showError('Failed to load PPTX library');
+      return;
+    }
+    const text = textarea.value || '';
+    const pptx = new window.PptxGenJS();
+    pptx.author = 'Mavrick';
+    pptx.title = (docs.get(activeDocId)?.title) || 'Document';
+
+    const slides = _parseMdToPptxSlides(text);
+    for (let si = 0; si < slides.length; si++) {
+      const slide = pptx.addSlide();
+      slide.background = { color: 'FFFFFF' };
+      if (slides[si].title) {
+        slide.addText(slides[si].title, {
+          x: 0.5, y: 0.3, w: 9.0, h: 0.7,
+          fontSize: 24, fontFace: 'Fira Code', color: '333333', bold: true,
+        });
+      }
+      slide.addText(`${si + 1} / ${slides.length}`, {
+        x: 8.5, y: 5.2, w: 1.0, h: 0.3,
+        fontSize: 8, fontFace: 'Arial', color: '999999', align: 'right',
+      });
+      const elements = _parsePptxBody(slides[si].body);
+      let yPos = 1.1;
+      let tableBuf = [];
+      function flushTable() {
+        if (tableBuf.length === 0) return;
+        const header = tableBuf[0];
+        const data = tableBuf.slice(1);
+        const colCount = header.length || 1;
+        const colW = Math.min(9.0 / colCount, 3.0);
+        const rows = [header.map(c => ({ text: c, options: { fontSize: 11, bold: true, color: 'FFFFFF', fill: { color: '4472C4' } } }))];
+        for (const r of data) rows.push(r.map(c => ({ text: c, options: { fontSize: 10, color: '333333' } })));
+        const th = Math.min(rows.length * 0.3 + 0.2, 3.0);
+        slide.addTable(rows, { x: 0.5, y: yPos, w: 9.0, fontSize: 10, fontFace: 'Arial', border: { pt: 0.5, color: 'CCCCCC' }, colW });
+        yPos += th + 0.15;
+        tableBuf = [];
+      }
+      for (const el of elements) {
+        if (yPos > 5.0) break;
+        if (el.type === 'table-row') { tableBuf.push(el.cells); continue; }
+        flushTable();
+        switch (el.type) {
+          case 'text':
+            slide.addText(el.text, { x: 0.5, y: yPos, w: 9.0, h: 0.35, fontSize: 13, fontFace: 'Arial', color: '333333' });
+            yPos += 0.35;
+            break;
+          case 'bullet':
+            slide.addText(el.text, { x: 0.5, y: yPos, w: 9.0, h: 0.3, fontSize: 12, fontFace: 'Arial', color: '333333', bullet: true });
+            yPos += 0.28;
+            break;
+          case 'code': {
+            const cl = el.text.split('\n').length;
+            const ch = Math.min(cl * 0.18 + 0.2, 3.0);
+            slide.addText(el.text, { x: 0.5, y: yPos, w: 9.0, h: ch, fontSize: 9, fontFace: 'Courier New', color: '1a1a1a', fill: { color: 'F5F5F5' } });
+            yPos += ch + 0.1;
+            break;
+          }
+        }
+      }
+      flushTable();
+    }
+
+    const baseName = _getExportBaseName();
+    await pptx.writeFile({ fileName: baseName + '.pptx' });
+    if (uiModule) uiModule.showToast('Exported as PowerPoint');
   }
 
   /** Delete the active document */

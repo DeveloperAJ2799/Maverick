@@ -44,6 +44,7 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "read_file",
     "write_file",
     "edit_file",
+    "generate_pdf",
     "grep",
     "glob",
     "ls",
