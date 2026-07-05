@@ -261,7 +261,8 @@ _DOMAIN_RULES = {
 ## File rules
 - Use file tools for real disk files. Use document tools only for editor documents.
 - Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
-- Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
+- Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.
+- For PDF output, use `generate_pdf` — it renders markdown to a styled PDF with images.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -357,6 +358,13 @@ Read a file and return its contents.""",
 <file contents>
 ```
 Write content to a file. First line is the path, rest is the content.""",
+
+    "generate_pdf": """\
+```generate_pdf
+<path to output.pdf>
+<markdown content with ## headings, - lists, **bold**, ![images](url)>
+```
+Generate a styled PDF on disk from markdown. Line 1 = output file path (e.g. `~/report.pdf`), remaining lines = markdown to render. Supports headings, bold, italic, bullet/numbered lists, tables, code blocks, horizontal rules, block quotes, and images via `![alt](url)`. ALWAYS use this tool when the user asks to create, export, or save a PDF document, report, or paper — never use bash+playwright, never use write_file for PDFs.""",
 
     "edit_file": """\
 ```edit_file
@@ -661,7 +669,7 @@ _ADMIN_SCHEMA_NAMES = frozenset([
     "create_session", "list_sessions", "send_to_session", "pipeline",
     "ask_teacher", "list_models", "search_chats",
 ])
-_TOOL_SELECTION_TIMEOUT_SECONDS = 1.5
+_TOOL_SELECTION_TIMEOUT_SECONDS = 5.0
 
 
 def _is_ollama_openai_compat_url(endpoint_url: str) -> bool:

@@ -170,7 +170,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "generate_pdf",
-            "description": "Generate a formatted PDF file from markdown or plain text. Supports headings (# ## ###), bullet lists (- *), numbered lists, bold (**text**), italic (*text*), inline code (`code`), tables (| col | col |), horizontal rules (---), code blocks (```), and block quotes (>). Use this whenever the user asks to create, export, or save a PDF. The PDF is written directly to disk.",
+            "description": "Generate a formatted PDF file from markdown. Supports headings (# ## ###), bullet lists (- *), numbered lists, bold (**text**), italic (*text*), inline code (`code`), tables (| col | col |), horizontal rules (---), code blocks (```), block quotes (>), and images (![alt](url)). ALWAYS use this for PDF creation — never use bash+playwright or write_file for PDFs.",
             "parameters": {
                 "type": "object",
                 "properties": {

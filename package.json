@@ -1,19 +1,95 @@
 {
   "name": "mavrick-desktop",
   "version": "1.0.0",
-  "description": "MAVRICK - JARVIS-style AI agent desktop app",
+  "description": "MAVRICK - AI agent desktop app",
   "main": "desktop/main.js",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-builder"
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/pewdiepie-archdaemon/mavrick.git"
   },
-  "dependencies": {},
+  "dependencies": {
+    "electron-updater": "^6.1.0"
+  },
   "devDependencies": {
     "@antithesishq/bombadil": "^0.6.1",
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^24.9.0"
+  },
+  "build": {
+    "appId": "com.mavrick.desktop",
+    "productName": "Mavrick",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/**/*",
+      "static/**/*",
+      "app.py",
+      "src/**/*",
+      "core/**/*",
+      "routes/**/*",
+      "services/**/*",
+      "scripts/**/*",
+      "mcp_servers/**/*",
+      "config/**/*",
+      "companion/**/*",
+      "requirements.txt",
+      "setup.py",
+      ".env.example"
+    ],
+    "extraResources": [
+      {
+        "from": "venv",
+        "to": "venv",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "static/icon.ico",
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Mavrick",
+      "installerIcon": "static/icon.ico",
+      "uninstallerIcon": "static/icon.ico",
+      "installerHeaderIcon": "static/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "static/icon.icns",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "static/icon.png",
+      "category": "Utility"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "pewdiepie-archdaemon",
+      "repo": "mavrick"
+    }
   }
 }

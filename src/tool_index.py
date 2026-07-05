@@ -42,6 +42,8 @@ ALWAYS_AVAILABLE = frozenset({
     "ask_user",
     # Write back to the active plan (tick steps done / revise) during execution.
     "update_plan",
+    # Core tools the agent should never lose — even when RAG times out.
+    "bash", "python", "read_file", "write_file", "generate_pdf",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
@@ -77,7 +79,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "ls": "List a directory's entries (folders then files with sizes). Use to see what's in a folder — prefer over bash ls.",
     "get_workspace": "Return the absolute path of the active workspace folder the user is working in. File tools are confined to it; the shell starts there but is not sandboxed. Call this first when the user refers to 'the project'/'the code'/'this folder' without giving a path, instead of asking them.",
     "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc.",
-    "generate_pdf": "Generate a formatted PDF file and save it to disk. Renders markdown: headings, bold, italic, bullet/numbered lists, tables, code blocks, horizontal rules. Use whenever the user asks to make, export, or save a PDF document, report, or paper.",
+    "generate_pdf": "Generate a styled PDF file on disk from markdown. Renders headings, bold, italic, bullet/numbered lists, tables, code blocks, horizontal rules, and images (![alt](url)). ALWAYS use this for PDF creation — never bash+playwright.",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
     "edit_document": "Preferred tool for editing an existing document — targeted find-and-replace. Use for any small change: add a function, fix a bug, tweak a section, rename things.",
@@ -506,6 +508,10 @@ class ToolIndex:
         frozenset({"write a", "create a doc", "draft", "compose", "poem", "story",
                    "essay", "outline", "letter"}):
             {"create_document", "edit_document", "update_document"},
+        # PDF generation intent
+        frozenset({"pdf", "export pdf", "save as pdf", "generate pdf",
+                   "make a pdf", "create a pdf", "print to pdf"}):
+            {"generate_pdf"},
     }
 
     def get_tools_for_query(

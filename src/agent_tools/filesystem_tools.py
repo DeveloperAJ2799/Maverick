@@ -523,14 +523,31 @@ class GeneratePdfTool:
                 from reportlab.lib import colors
                 from reportlab.platypus import (
                     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-                    HRFlowable, PageBreak,
+                    HRFlowable, PageBreak, Image,
                 )
                 from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT
+                from io import BytesIO
             except ImportError:
                 return None, "reportlab is not installed. Run: pip install reportlab"
 
             import os
+            import re as _re_img
+            import logging as _img_log
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+            def _fetch_image(src):
+                """Download a remote image or return a local path."""
+                src = src.strip()
+                if src.startswith(("http://", "https://")):
+                    import urllib.request
+                    req = urllib.request.Request(src, headers={"User-Agent": "Mavrick/1.0"})
+                    resp = urllib.request.urlopen(req, timeout=15)
+                    return BytesIO(resp.read())
+                if not os.path.isabs(src):
+                    src = os.path.join(os.path.dirname(path) or ".", src)
+                return src
+
+            max_img_width = letter[0] - 2 * inch
 
             doc = SimpleDocTemplate(
                 path,
@@ -626,6 +643,25 @@ class GeneratePdfTool:
                 # Page break marker
                 elif line.strip().startswith("<!-- pagebreak") or line.strip() == "\\pagebreak":
                     story.append(PageBreak())
+                # Images: ![alt](src)
+                elif _re_img.match(r'!\[', line.strip()):
+                    _img_m = _re_img.match(r'!\[([^\]]*)\]\(([^)]+)\)', line.strip())
+                    if _img_m:
+                        _alt, _src = _img_m.group(1), _img_m.group(2)
+                        try:
+                            _img_data = _fetch_image(_src)
+                            _img = Image(_img_data)
+                            if _img.drawWidth > max_img_width:
+                                _ratio = max_img_width / _img.drawWidth
+                                _img.drawWidth = max_img_width
+                                _img.drawHeight *= _ratio
+                            _img.hAlign = "CENTER"
+                            story.append(_img)
+                            story.append(Spacer(1, 6))
+                        except Exception as _img_err:
+                            story.append(Paragraph(f"[Image: {_alt or _src} — failed to load: {_img_err}]", body_style))
+                    else:
+                        story.append(Paragraph(html_escape(line.strip()), body_style))
                 # Bullet lists
                 elif line.startswith("- ") or line.startswith("* "):
                     story.append(Paragraph("• " + parse_inline(line[2:]), bullet_style))
